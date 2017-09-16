@@ -489,6 +489,7 @@ class PSX(object):
 		self.objs = []
 		self.mdls = []
 		self.texs = []
+		self.palents = [[random.randint(0,255) for i in range(3)]+[0] for j in range(256)]
 
 	def texture(self, *, iw, ih, unk1=0x0000, bpp, pal, data):
 		idx = len(self.texs)
@@ -564,10 +565,12 @@ class PSX(object):
 		fp.write(struct.pack("<I", tmp))
 		fp.seek(tmp)
 		fp.write(b"RGBs")
-		palents = [[random.randint(0,255) for i in range(3)]+[0] for j in range(256)]
-		fp.write(struct.pack("<I", len(palents)*4))
+		while len(self.palents) < 256:
+			self.palents.append([random.randint(0,255) for i in range(3)]+[0])
+		assert len(self.palents) == 256
+		fp.write(struct.pack("<I", len(self.palents)*4))
 		paldata_ptr = fp.tell()
-		for rgbs in palents:
+		for rgbs in self.palents:
 			fp.write(struct.pack("<BBBB", *rgbs))
 
 		# Patchup
@@ -722,16 +725,48 @@ def export_trg(trg_fname):
 		pal=[rgb15(128,128,128)]*16,
 		data=[0x00]*(8*8//2))
 
+	# Light all the things
+	# TODO: handle non-greyscale lighting
+	# TODO: autocalculate this
+	palette = [[i,i,i,0] for i in range(256)]
+	psx.palents = palette
+
+	# Go through all of the lamps
+	lamps = []
+	for obj in bpy.data.objects:
+		# Ensure that this is a lamp
+		if not isinstance(obj.data, bpy.types.Lamp):
+			continue
+
+		# Get location
+		locationx = obj.location.x
+		locationy = obj.location.y
+		locationz = obj.location.z
+
+		# Get lamp
+		lamp = obj.data
+
+		lamps.append({
+			"pos": (locationx, locationy, locationz,),
+			"type": lamp.type,
+		})
+
 	# Go through the meshes and form objects
-	for mesh in bpy.data.meshes:
+	for obj in bpy.data.objects:
+		# Ensure that this is a mesh
+		if not isinstance(obj.data, bpy.types.Mesh):
+			continue
+
 		# Get object + suitable transformation
-		obj = bpy.data.objects[mesh.name]
 		scalex = obj.scale.x
 		scaley = obj.scale.y
 		scalez = obj.scale.z
 		locationx = obj.location.x
 		locationy = obj.location.y
 		locationz = obj.location.z
+
+		# Get mesh
+		mesh = obj.data
 
 		# Get vertices
 		vertices = list(map(
@@ -742,7 +777,7 @@ def export_trg(trg_fname):
 				fix12(( v.co.y*scaley+locationy)/BLEND_PER_THPS),
 			),
 			mesh.vertices))
-		
+
 		# Get centre
 		xmin = min(map(lambda v: v[0], vertices))
 		ymin = min(map(lambda v: v[1], vertices))
@@ -781,6 +816,12 @@ def export_trg(trg_fname):
 			lambda v:
 			mdl.vertex(*v),
 			vertices))
+		cidxs = []
+		for v in vertices:
+			# Get vertex normal
+			# TODO!
+			#v[0]
+			cidxs.append(random.randint(64,192))
 
 		for poly in mesh.polygons:
 			# Triangulate and/or Quadrilaterate
@@ -816,7 +857,7 @@ def export_trg(trg_fname):
 				if i3 != None:
 					i1, i2, i3 = i1, i3, i2
 
-				rflags = 0x1003
+				rflags = 0x1803
 				sflags = 0x0000
 
 				if i3 == None:
@@ -831,10 +872,14 @@ def export_trg(trg_fname):
 						vidxs[i2],
 						vidxs[i3] if i3 != None else 0,
 					],
+					#cmd = [random.randint(80,160) for i in range(3) ]+[0x24],
+					#cmd = [random.randint(0,255) for i in range(4)],
 					cmd = [
-						random.randint(80,160)
-						for i in range(3)
-					]+[0x24],
+						cidxs[i0],
+						cidxs[i1],
+						cidxs[i2],
+						cidxs[i3] if i3 != None else 0,
+					],
 					tidx = dummytex_idx,
 					tpoints = [
 						(0,0),
@@ -890,9 +935,9 @@ class THPSMapExporter(bpy.types.Operator):
 
 	filepath = bpy.props.StringProperty(subtype="FILE_PATH")
 
-	@classmethod
-	def poll(cls, context):
-		return context.object is not None
+	#@classmethod
+	#def poll(cls, context):
+	#	return context.object is not None
 
 	def execute(self, context):
 		export_trg(self.filepath)
